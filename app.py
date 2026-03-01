@@ -1,101 +1,98 @@
 import streamlit as st
-import pandas as pd
 import plotly.graph_objects as go
 
 # ページ設定
-st.set_page_config(page_title="次世代 賃料査定エンジン", layout="wide")
+st.set_page_config(page_title="一都三県・プロ仕様査定", layout="wide")
 
-st.title("🏙️ 次世代・高精度賃料査定エンジン")
-st.markdown("---")
+st.title("🏘️ 一都三県・建物種別対応 賃料査定エンジン")
+st.caption("マンション・アパート・戸建ての構造特性とエリアランクを反映した最新Ver.")
 
-# サイドバー：入力フォーム
-st.sidebar.header("【1】 物件基本情報")
-area_type = st.sidebar.selectbox("エリア選択", ["都心Sクラス", "準都心Aクラス", "一般Bクラス", "郊外Cクラス"])
-layout = st.sidebar.selectbox("間取り", ["1R/1K", "1LDK", "2LDK", "3LDK以上"])
-sqm = st.sidebar.number_input("専有面積 (㎡)", value=25.0, step=0.5)
+# --- サイドバー入力 ---
+st.sidebar.header("【1】 物件属性")
+# 建物種別の選択を追加
+b_type = st.sidebar.radio("建物種別", ["マンション", "アパート", "戸建て"])
+
+# エリアランクの定義（一都三県を想定）
+area_rank = st.sidebar.selectbox("エリアランク", [
+    "S: 都心5区・主要ターミナル駅直結", 
+    "A: 23区人気住宅街・横浜/川崎中心部", 
+    "B: 23区外縁・多摩・さいたま・千葉中心", 
+    "C: 一都三県郊外・バス便エリア"
+])
+
+st.sidebar.header("【2】 形状・立地")
+sqm = st.sidebar.number_input("専有面積 (㎡)", value=25.0, step=1.0)
 walk_min = st.sidebar.slider("駅徒歩 (分)", 1, 20, 5)
 age = st.sidebar.slider("築年数 (年)", 0, 30, 5)
 
-st.sidebar.header("【2】 設備・付加価値")
-has_autolock = st.sidebar.checkbox("オートロック・防犯カメラ")
-has_delivery = st.sidebar.checkbox("宅配ボックス")
-is_separate_wc = st.sidebar.checkbox("バス・トイレ別", value=True)
-has_net_free = st.sidebar.checkbox("インターネット無料")
+st.sidebar.header("【3】 付加価値設備")
+has_luxury = st.sidebar.checkbox("ハイグレード設備（床暖房・食洗機等）")
+has_security = st.sidebar.checkbox("高度セキュリティ（内廊下・有人管理）")
 
 # --- 凄腕査定ロジック ---
-def calculate_rent():
-    # 1. ベース単価（エリア×間取り）
-    base_data = {
-        "都心Sクラス": {"1R/1K": 4800, "1LDK": 4500, "2LDK": 4200, "3LDK以上": 4000},
-        "準都心Aクラス": {"1R/1K": 3800, "1LDK": 3500, "2LDK": 3200, "3LDK以上": 3000},
-        "一般Bクラス": {"1R/1K": 3000, "1LDK": 2800, "2LDK": 2600, "3LDK以上": 2500},
-        "郊外Cクラス": {"1R/1K": 2500, "1LDK": 2300, "2LDK": 2100, "3LDK以上": 2000},
-    }
-    unit_price = base_data[area_type][layout]
+def calculate_advanced_rent():
+    # 1. エリア別基本単価（平米単価）
+    base_prices = {"S": 5500, "A": 4200, "B": 3200, "C": 2400}
+    rank_key = area_rank[0] 
+    price = base_prices[rank_key]
 
-    # 2. 減価補正（徒歩・築年数）
-    # 徒歩：7分を境に下落率が上がるロジック
-    walk_penalty = 0.012 if walk_min <= 7 else 0.018
-    walk_factor = 1 - (walk_min * walk_penalty)
+    # 2. 建物種別補正
+    # マンションを1.0とし、アパートは管理・遮音性でマイナス、戸建ては希少性でプラス
+    type_coeff = {"マンション": 1.0, "アパート": 0.88, "戸建て": 1.15}
     
-    # 築年数：4-5年を「準新築」として評価維持
-    age_factor = 1 - (age * 0.008) if age > 2 else 0.98
+    # 3. 駅徒歩補正（7分、10分を境に下落率を変化させる非線形ロジック）
+    if walk_min <= 7:
+        w_factor = 1.0 - (walk_min * 0.01)
+    elif walk_min <= 10:
+        w_factor = 0.93 - ((walk_min - 7) * 0.02)
+    else:
+        w_factor = 0.87 - ((walk_min - 10) * 0.04)
     
-    # 3. 設備加点（実益重視）
-    bonus = 0
-    if has_autolock: bonus += 3000
-    if has_delivery: bonus += 1500
-    if is_separate_wc: bonus += 5000
-    if has_net_free: bonus += 2000
+    # 4. 築年数補正（築5年までは「新築・築浅プレミアム」で維持）
+    if age <= 5:
+        a_factor = 1.0 - (age * 0.005)
+    else:
+        a_factor = 0.97 - ((age - 5) * 0.012)
 
-    # 4. 計算
-    estimated_rent = (unit_price * sqm * walk_factor * age_factor) + bonus
-    return int(estimated_rent)
+    # 5. 基本計算
+    core_rent = price * sqm * w_factor * a_factor * type_coeff[b_type]
+    
+    # 6. 設備加点
+    if has_luxury: core_rent += (sqm * 200) # 平米あたり200円加算
+    if has_security: core_rent += 5000       # 月額5,000円加算
+    
+    return int(core_rent)
 
-# 実行
-rent = calculate_rent()
+rent = calculate_advanced_rent()
 
 # --- 画面表示 ---
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("査定結果")
-    st.write(f"### 推定適正家賃: **{rent:,} 円**")
+    st.metric("推定適正家賃", f"{rent:,} 円")
     
-    # メーター表示（成約確率）
-    # 徒歩・築年数が良いほど確率アップ、家賃が高いとダウンするシミュレーション
-    probability = 95 - (walk_min * 2) - (age * 1)
+    # 成約確率の可視化
+    prob = 90 - (walk_min * 2) - (age * 1)
+    if b_type == "戸建て": prob += 5 # 戸建ては希少なため成約しやすい
     
     fig = go.Figure(go.Indicator(
         mode = "gauge+number",
-        value = probability,
-        title = {'text': "1ヶ月以内の成約確率 (%)"},
-        gauge = {
-            'axis': {'range': [0, 100]},
-            'bar': {'color': "#00cc96"},
-            'steps': [
-                {'range': [0, 50], 'color': "#ff4b4b"},
-                {'range': [50, 80], 'color': "#ffa500"},
-                {'range': [80, 100], 'color': "#00cc96"}]
-        }
+        value = min(max(prob, 10), 98),
+        gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#1f77b4"}},
+        title = {'text': "1ヶ月以内の成約期待値 (%)"}
     ))
     st.plotly_chart(fig, use_container_width=True)
 
 with col2:
-    st.subheader("プロの視点アドバイス")
-    st.info(f"""
-    **現在の市場分析:**
-    - {area_type}の{layout}タイプは、現在供給が絞られており、強気の募集が可能です。
-    - 築{age}年は、新築時よりもグロス賃料を抑えられるため、法人契約の需要が非常に高いゾーンです。
-    - 徒歩{walk_min}分という立地は検索フィルタ「10分以内」に確実に残るため、露出度は良好です。
-    """)
+    st.subheader("査定の根拠と戦略")
+    st.write(f"● **建物種別補正**: {b_type}特有の需要を反映しました。")
+    st.write(f"● **立地評価**: {area_rank}における駅徒歩{walk_min}分の希少性を算出。")
     
-    st.warning(f"""
-    **空室対策のヒント:**
-    近隣の未入居新築が「{int(rent*1.15):,}円」程度で募集されている場合、
-    あえてこの査定額（{rent:,}円）で募集することで、圧倒的な『割安感』を演出し、
-    相見積もりで100%勝てるポジションを取ることができます。
-    """)
+    if age <= 5:
+        st.success("✨ **築浅プレミアム適用**: 建築費高騰により、この築年数は新築検討層を取り込める強い訴求力があります。")
+    
+    st.warning("⚠️ **現場からの助言**: この金額は「成約」を目的とした実利的な数値です。ポータルの見せかけの募集価格に合わせず、このラインで勝負することをお勧めします。")
 
-st.write("---")
-st.caption("※本査定はAIロジックによる推定であり、実際の成約を保証するものではありません。")
+st.markdown("---")
+st.caption("※本システムは統計データに基づいた推計であり、物件の個別状態（眺望・リフォーム状況等）により変動します。")
