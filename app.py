@@ -97,3 +97,37 @@ with col2:
         st.warning("※現在、多言語PDF生成の準備中です。アルファベット表記のみ出力可能です。")
 
 st.info(f"💡 【{route}】の成約トレンドを反映済み。賃借人の支払総額ベースで算出しています。")
+import streamlit as st
+import pandas as pd
+
+st.title("🚉 一都三県・全駅対応 賃料査定システム")
+
+# CSVデータの読み込み（GitHubに上げたファイルを読み込む）
+@st.cache_data
+def load_data():
+    # station_master.csv を読み込む。ファイルがない場合はサンプルを表示
+    try:
+        return pd.read_csv("station_master.csv")
+    except:
+        return pd.DataFrame({"station_name": ["西武新宿", "所沢", "練馬"], "base_price": [4200, 2800, 3600]})
+
+df = load_data()
+
+# サイドバーで駅を検索・選択
+st.sidebar.header("【1】 駅・路線設定")
+target_station = st.sidebar.selectbox("対象駅を選択または入力", df["station_name"])
+
+# 選択された駅の単価を取得
+station_info = df[df["station_name"] == target_station].iloc[0]
+base_price = station_info["base_price"]
+
+# --- 以下、これまでの査定ロジックを継続 ---
+st.sidebar.header("【2】 物件詳細")
+sqm = st.sidebar.number_input("専有面積 (㎡)", value=25.0)
+walk_min = st.sidebar.slider("駅徒歩 (分)", 1, 20, 5)
+
+# 計算（簡易版）
+rent = int(base_price * sqm * (1.0 - walk_min * 0.015))
+
+st.metric(f"{target_station}駅 の査定結果", f"{rent:,} 円")
+st.info(f"💡 現在、{target_station}駅の相場（平米単価 {base_price}円）に基づいて算出しています。")
